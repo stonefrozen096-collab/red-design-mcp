@@ -1,0 +1,82 @@
+{
+  "name": "red-design-mcp",
+  "version": "0.1.0",
+  "description": "Give your AI tools a designer's eye: analyze, recreate, reimagine, critique and audit any design. MCP server with one-command install for Claude Code, Codex, Cursor and Claude Desktop.",
+  "type": "module",
+  "bin": {
+    "red-design-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/index.js",
+    "dev": "tsc --watch",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
+    "prepublishOnly": "npm test",
+    "test": "npm run build && node --test"
+  },
+  "keywords": [
+    "accessibility",
+    "agents",
+    "agents-md",
+    "ai",
+    "anthropic",
+    "chart-palette",
+    "claude-code",
+    "codex",
+    "codex-agents",
+    "color-palette",
+    "colorblind-safe",
+    "copilot",
+    "css-linter",
+    "cursor",
+    "cursor-agents",
+    "dark-mode",
+    "data-visualization",
+    "design",
+    "design-system",
+    "design-system-generator",
+    "design-tokens",
+    "design-tokens-extractor",
+    "favicon",
+    "figma",
+    "font-pairing",
+    "forms",
+    "gemini",
+    "gemini-cli",
+    "gradient",
+    "groq",
+    "mcp",
+    "mcp-prompts",
+    "model-context-protocol",
+    "ollama",
+    "openai",
+    "openrouter",
+    "screenshot",
+    "subagents",
+    "tool-discovery",
+    "typography",
+    "ui",
+    "ux",
+    "wcag",
+    "website-scraper"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0"
+  },
+  "optionalDependencies": {
+    "playwright-core": "^1.45.0"
+  }
+}
