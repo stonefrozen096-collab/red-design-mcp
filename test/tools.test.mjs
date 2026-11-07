@@ -27,6 +27,18 @@ test("palette has 11 steps, keeps the base color and rejects bad input", () => {
   assert.throws(() => generatePalette("nope", "triadic"));
 });
 
+test("semantic colors come with a readable label color and a readable subtle pair", () => {
+  for (const base of ["#e11d48", "#2563eb", "#facc15", "#111111"]) {
+    const p = generatePalette(base, "analogous");
+    for (const name of ["success", "warning", "danger", "info"]) {
+      const { text, ratio } = p.on_semantic[name];
+      assert.ok(ratio >= 4.5, `${base} ${name} label ${ratio}`);
+      assert.ok(Math.abs(contrastRatio(text, p.semantic[name]["600"]) - ratio) < 0.01);
+      assert.ok(contrastRatio(p.semantic[name]["800"], p.semantic[name]["100"]) >= 4.5, `${base} ${name} 800 on 100`);
+    }
+  }
+});
+
 test("color blindness simulation keeps white white and distance is zero for equal colors", () => {
   assert.equal(simulate("#ffffff", "deuteranopia"), "#ffffff");
   assert.equal(deltaE("#336699", "#336699"), 0);

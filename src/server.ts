@@ -321,7 +321,7 @@ server.registerTool(
   {
     title: "Generate Color Palette",
     description:
-      "Generate a complete, accessible color system from one base color: a 50-950 primary scale, harmony accents, tinted neutrals, semantic colors (success, warning, danger, info) and the best text color on each primary step. Deterministic, no API key needed.",
+      "Generate a complete, accessible color system from one base color: a 50-950 primary scale, harmony accents, tinted neutrals, semantic colors (success, warning, danger, info) and the best label color on each primary step and each semantic color. Deterministic, no API key needed.",
     inputSchema: {
       base: z.string().describe("Base brand color as hex, e.g. #e11d48"),
       harmony: z

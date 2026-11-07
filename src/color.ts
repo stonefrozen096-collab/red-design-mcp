@@ -109,6 +109,8 @@ export interface Palette {
   neutral: Scale;
   semantic: Record<string, Scale>;
   on_primary: Record<string, { text: string; ratio: number }>;
+  /** Best label color (white or black) on each semantic color's solid 600 step. */
+  on_semantic: Record<string, { text: string; ratio: number }>;
 }
 
 export function generatePalette(baseInput: string, harmony: string): Palette {
@@ -142,7 +144,13 @@ export function generatePalette(baseInput: string, harmony: string): Palette {
     const k = contrastRatio("#000000", hex) ?? 0;
     on_primary[step] = w >= k ? { text: "#ffffff", ratio: +w.toFixed(2) } : { text: "#000000", ratio: +k.toFixed(2) };
   }
-  return { base, harmony, primary, accents, neutral, semantic, on_primary };
+  const on_semantic: Palette["on_semantic"] = {};
+  for (const [name, scale] of Object.entries(semantic)) {
+    const w = contrastRatio("#ffffff", scale["600"]) ?? 0;
+    const k = contrastRatio("#000000", scale["600"]) ?? 0;
+    on_semantic[name] = w >= k ? { text: "#ffffff", ratio: +w.toFixed(2) } : { text: "#000000", ratio: +k.toFixed(2) };
+  }
+  return { base, harmony, primary, accents, neutral, semantic, on_primary, on_semantic };
 }
 
 function groups(p: Palette): Record<string, Scale> {
