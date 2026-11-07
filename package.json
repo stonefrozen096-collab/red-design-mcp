@@ -78,5 +78,13 @@
   },
   "optionalDependencies": {
     "playwright-core": "^1.45.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stonefrozen096-collab/red-design-mcp.git"
+  },
+  "homepage": "https://github.com/stonefrozen096-collab/red-design-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/stonefrozen096-collab/red-design-mcp/issues"
   }
 }
