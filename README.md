@@ -143,7 +143,7 @@ These never need a model or a key. Same input, same answer, instantly.
 | `generate_form_styles` | Accessible **form CSS**: labels, inputs, placeholder, hover, focus, error and disabled states, help text and checkbox accents, every contrast rule verified. |
 | `generate_favicon` | A crisp **SVG monogram favicon** in your brand color with readable letter contrast, plus the HTML tags. |
 | `generate_chart_palette` | **Data-viz colors** that work for everyone: a colorblind-safe categorical set (up to 8), a sequential ramp with steadily falling lightness, or a diverging palette with a neutral midpoint, each verified. |
-| `generate_palette` | One brand color to a full system: **50-950 scale**, harmony accents, tinted neutrals, semantic colors, and the best text color on every step. |
+| `generate_palette` | One brand color to a full system: **50-950 scale**, harmony accents, tinted neutrals, semantic colors, and the best label color (white or black) on every primary step and every semantic color. |
 | `simulate_colorblind` | Protanopia, deuteranopia, tritanopia and achromatopsia, plus a flag for pairs that **look different normally but collapse** for color-blind users. |
 | `generate_type_scale` | Modular type scale (minor second to golden ratio) with line heights, optionally **fluid** via CSS `clamp()`. |
 | `check_contrast` | Exact WCAG contrast ratios for any color pairs, with the nearest passing fix. |
