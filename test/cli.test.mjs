@@ -7,7 +7,7 @@ import { join } from "node:path";
 const home = mkdtempSync(join(tmpdir(), "red-test-"));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
-const { installClient, installAgents, installAgentsMd, agentsDirFor, detectAgentTargets } = await import("../dist/cli.js");
+const { installClient, installAgents, installAgentsMd, agentsDirFor, detectAgentTargets, inspectClients } = await import("../dist/cli.js");
 const { AGENTS } = await import("../dist/agents.js");
 
 test("installer merges into existing JSON config without touching other servers, and is idempotent", () => {
@@ -80,4 +80,66 @@ test("AGENTS.md block is added once, refreshed in place, and never touches other
   assert.ok(text.includes("## After block") && text.includes("Keep me."));
   const fresh = join(home, "nested-AGENTS.md");
   assert.match(installAgentsMd(fresh), /added/);
+});
+
+test("installer keeps the user's indentation, line endings and earlier backups", () => {
+  const file = join(home, ".cursor", "mcp.json");
+  const cfg = (indent, eol) => JSON.stringify({ mcpServers: { other: { command: "x" } }, theme: "dark" }, null, indent).replace(/\n/g, eol);
+  for (const [name, indent, eol, endNl] of [["tabs", "\t", "\n", "\n"], ["four", 4, "\n", ""], ["crlf", 2, "\r\n", "\r\n"]]) {
+    writeFileSync(file, cfg(indent, eol) + endNl);
+    assert.match(installClient("cursor"), /added/, name);
+    const out = readFileSync(file, "utf8");
+    assert.ok(JSON.parse(out).mcpServers.red && JSON.parse(out).theme === "dark", name);
+    const firstIndent = out.match(/^([ \t]+)"/m)[1];
+    assert.equal(firstIndent, indent === "\t" ? "\t" : " ".repeat(indent), name);
+    assert.equal(out.endsWith("\n"), endNl !== "", name);
+    assert.equal(out.includes("\r\n"), eol === "\r\n", name);
+    assert.equal(readFileSync(file + ".bak", "utf8").startsWith("{"), true);
+  }
+  // the very first backup is never overwritten by later installs
+  writeFileSync(file, JSON.stringify({ mcpServers: {}, marker: "ORIGINAL" }));
+  const before = readdirSync(join(home, ".cursor")).filter((f) => f.includes(".bak")).length;
+  installClient("cursor");
+  assert.equal(readdirSync(join(home, ".cursor")).filter((f) => f.includes(".bak")).length, before + 1);
+  assert.ok(readFileSync(file + ".bak", "utf8") !== JSON.stringify({ mcpServers: {}, marker: "ORIGINAL" }), "an older backup was kept untouched");
+});
+
+test("configs with comments or the wrong shape are left untouched", () => {
+  const file = join(home, ".cursor", "mcp.json");
+  for (const text of ['{\n  // my note\n  "mcpServers": {}\n}', '{"mcpServers": {},}', "[]", '{"mcpServers": []}', '"just a string"']) {
+    writeFileSync(file, text);
+    assert.throws(() => installClient("cursor"), /Nothing was changed|not a JSON object|not an object/);
+    assert.equal(readFileSync(file, "utf8"), text, "file must be byte-for-byte unchanged");
+  }
+  writeFileSync(file, "");
+  assert.match(installClient("cursor"), /added/);
+  assert.ok(JSON.parse(readFileSync(file, "utf8")).mcpServers.red);
+  assert.ok(!readdirSync(join(home, ".cursor")).some((f) => f.includes(".tmp-")), "no temp files left behind");
+});
+
+test("--global writes the installed binary instead of npx", () => {
+  const file = join(home, ".cursor", "mcp.json");
+  writeFileSync(file, "{}");
+  installClient("cursor", { global: true });
+  const red = JSON.parse(readFileSync(file, "utf8")).mcpServers.red;
+  const flat = [red.command, ...red.args].join(" ");
+  assert.ok(!flat.includes("npx"), flat);
+  assert.ok(flat.includes("red-design-mcp"), flat);
+});
+
+test("doctor reports each tool's config status", () => {
+  const cursor = join(home, ".cursor", "mcp.json");
+  writeFileSync(cursor, JSON.stringify({ mcpServers: { red: { command: "x" } } }));
+  assert.equal(inspectClients(["cursor"])[0].status, "installed");
+  writeFileSync(cursor, JSON.stringify({ mcpServers: {} }));
+  assert.equal(inspectClients(["cursor"])[0].status, "not-installed");
+  writeFileSync(cursor, "{ broken");
+  const bad = inspectClients(["cursor"])[0];
+  assert.equal(bad.status, "invalid-config");
+  assert.match(bad.detail, /not valid JSON/);
+  writeFileSync(cursor, "");
+  assert.equal(inspectClients(["cursor"])[0].status, "not-installed");
+  assert.equal(inspectClients(["codex"])[0].status, "installed");
+  assert.equal(inspectClients(["claude-code"])[0].status, "not-inspected");
+  assert.equal(inspectClients(["claude-desktop"])[0].status, "no-config");
 });

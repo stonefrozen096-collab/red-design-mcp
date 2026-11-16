@@ -7,11 +7,17 @@ import { AGENTS, AGENT_TARGETS, AGENTS_MD_END, AGENTS_MD_START, renderAgent, ren
 import { describeParams, findToolsText, rankTools, runTool } from "../dist/gateway.js";
 
 const server = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
-const registered = [...server.matchAll(/registerTool\(\s*"([a-z_]+)"/g)].map((m) => m[1]).filter((n) => !["find_tools", "run_tool"].includes(n));
+const registered = [...server.matchAll(/defineTool\(\s*"([a-z_]+)"/g)].map((m) => m[1]).filter((n) => !["find_tools", "run_tool"].includes(n));
 
 test("ALL_TOOLS matches the tools the server registers", () => {
   assert.deepEqual([...registered].sort(), [...ALL_TOOLS].sort());
   assert.equal(new Set(ALL_TOOLS).size, ALL_TOOLS.length);
+});
+
+test("the security group holds exactly the Red Chex tools", () => {
+  assert.deepEqual([...GROUPS.security].sort(), ["audit_html", "audit_security", "generate_csp", "generate_security_headers", "scan_secrets"]);
+  assert.ok(AGENTS.some((a) => a.name === "red-chex" && a.tools.every((t) => GROUPS.security.includes(t))));
+  assert.ok(PLAYBOOKS.some((p) => p.name === "security-check"));
 });
 
 test("every tool is in a group and every group member exists", () => {
@@ -47,7 +53,7 @@ test("playbooks only reference real tools", () => {
 test("agents: roster is consistent and only references real tools", () => {
   assert.equal(new Set(AGENTS.map((a) => a.name)).size, AGENTS.length);
   assert.equal(AGENTS.filter((a) => a.role === "router").length, 1);
-  assert.ok(AGENTS.length >= 13);
+  assert.ok(AGENTS.length >= 14);
   const lead = AGENTS.find((a) => a.role === "router");
   for (const a of AGENTS) {
     assert.match(a.name, /^[a-z][a-z0-9_-]*$/, a.name);
@@ -95,7 +101,7 @@ test("AGENTS.md block lists every specialist and is delimited", () => {
   for (const a of AGENTS) assert.ok(block.includes(a.name), a.name);
 });
 
-const entries = [...server.matchAll(/registerTool\(\s*"([a-z_]+)",\s*\{\s*title:\s*"((?:[^"\\]|\\.)*)",\s*description:\s*(?:\n\s*)?"((?:[^"\\]|\\.)*)"/g)]
+const entries = [...server.matchAll(/defineTool\(\s*"([a-z_]+)",\s*\{\s*title:\s*"((?:[^"\\]|\\.)*)",\s*description:\s*(?:\n\s*)?"((?:[^"\\]|\\.)*)"/g)]
   .filter((m) => ALL_TOOLS.includes(m[1]))
   .map((m) => ({ name: m[1], config: { title: m[2], description: m[3] }, handler: async (a) => ({ content: [{ type: "text", text: JSON.stringify(a) }] }) }));
 
@@ -107,6 +113,12 @@ test("gateway finds the right tool for common tasks", () => {
   assert.equal(top("pick fonts that feel luxurious")[0], "suggest_font_pairings");
   assert.equal(top("add dark mode to my theme")[0], "generate_dark_theme");
   assert.equal(top("create a favicon for my brand")[0], "generate_favicon");
+  assert.equal(top("check my site's security headers")[0], "audit_security");
+  assert.equal(top("scan my code for leaked api keys")[0], "scan_secrets");
+  assert.equal(top("write a content security policy")[0], "generate_csp");
+  assert.ok(top("nginx security headers config").includes("generate_security_headers"));
+  assert.ok(top("check my html markup for accessibility").includes("audit_html"));
+  assert.ok(top("does my website have tracking cookies or privacy problems").includes("audit_security"));
   assert.match(findToolsText(entries, ""), /core:/);
 });
 
