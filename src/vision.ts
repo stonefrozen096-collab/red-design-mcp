@@ -1,29 +1,80 @@
-import { readFile } from "node:fs/promises";
-import { extname } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { basename, delimiter, extname, join, resolve, sep } from "node:path";
+import { readBytes, safeFetch } from "./web.js";
 
 export interface LoadedImage {
   base64: string;
   mediaType: string;
 }
 
-const MIME: Record<string, string> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+/** Identify an image by its file signature, never by its name. Returns null for anything else. */
+export function sniffImage(buf: Buffer): string | null {
+  if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  const head6 = buf.subarray(0, 6).toString("latin1");
+  if (head6 === "GIF87a" || head6 === "GIF89a") return "image/gif";
+  if (buf.length >= 12 && buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP") return "image/webp";
+  return null;
+}
+
+const isInside = (child: string, root: string) => {
+  const norm = (p: string) => (process.platform === "win32" || process.platform === "darwin" ? p.toLowerCase() : p);
+  const c = norm(child);
+  const r = norm(root);
+  return c === r || c.startsWith(r.endsWith(sep) ? r : r + sep);
 };
 
+/** Folders the server may read images from. Unset means anywhere, but only real image files. */
+async function allowedRoots(): Promise<string[] | null> {
+  const raw = process.env.RED_ALLOWED_DIRS?.trim();
+  if (!raw) return null;
+  const roots = [...raw.split(delimiter).filter(Boolean), join(tmpdir(), "red-design-mcp")];
+  const real: string[] = [];
+  for (const r of roots) {
+    try {
+      real.push(await realpath(resolve(r)));
+    } catch {
+      /* folder does not exist yet */
+    }
+  }
+  return real;
+}
+
+/**
+ * Load an image from a URL or a local path. Local reads are limited to PNG, JPEG, GIF and WebP files
+ * (checked by extension and by file signature), so a prompt cannot use this to read arbitrary files.
+ * Set RED_ALLOWED_DIRS to also confine reads to specific folders.
+ */
 export async function loadImage(source: string): Promise<LoadedImage> {
   if (/^https?:\/\//i.test(source)) {
-    const res = await fetch(source);
+    const res = await safeFetch(source);
     if (!res.ok) throw new Error(`Could not fetch image (${res.status})`);
-    const mediaType = res.headers.get("content-type")?.split(";")[0] ?? "image/png";
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = await readBytes(res, MAX_IMAGE_BYTES);
+    const mediaType = sniffImage(buf);
+    if (!mediaType) throw new Error("That URL did not return a PNG, JPEG, GIF or WebP image.");
     return { base64: buf.toString("base64"), mediaType };
   }
-  const buf = await readFile(source);
-  const mediaType = MIME[extname(source).toLowerCase()] ?? "image/png";
+
+  const expanded = source.startsWith("~/") || source.startsWith("~\\") ? join(homedir(), source.slice(2)) : source;
+  const real = await realpath(resolve(expanded)); // follows symlinks, so a link cannot point outside
+  const name = basename(real);
+  if (!IMAGE_EXTENSIONS.has(extname(real).toLowerCase())) {
+    throw new Error(`Only image files (png, jpg, jpeg, gif, webp) can be read. "${name}" is not one.`);
+  }
+  const roots = await allowedRoots();
+  if (roots && !roots.some((r) => isInside(real, r))) {
+    throw new Error(`"${name}" is outside the folders allowed by RED_ALLOWED_DIRS.`);
+  }
+  const info = await stat(real);
+  if (!info.isFile()) throw new Error(`"${name}" is not a file.`);
+  if (info.size > MAX_IMAGE_BYTES) throw new Error(`"${name}" is larger than ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`);
+  const buf = await readFile(real);
+  const mediaType = sniffImage(buf);
+  if (!mediaType) throw new Error(`"${name}" is not a PNG, JPEG, GIF or WebP image.`);
   return { base64: buf.toString("base64"), mediaType };
 }
 

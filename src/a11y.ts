@@ -1,3 +1,5 @@
+import { SUPPORTED_COLOR_FORMATS, parseColor } from "./colorparse.js";
+
 export interface PairInput {
   element: string;
   foreground: string;
@@ -32,11 +34,23 @@ Rules:
 - large_text is true only for text of 24px+ or 18.66px+ bold. Use kind "ui" for icons and component borders.
 - Also report non-contrast issues you can see: small tap targets, tiny text, color-only meaning, missing labels or alt text, weak focus cues.`;
 
-export function hexToRgb(hex: string): [number, number, number] | null {
-  let h = hex.trim().replace(/^#/, "");
-  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
-  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
+export { parseColor, SUPPORTED_COLOR_FORMATS } from "./colorparse.js";
+
+/**
+ * Parse any supported opaque color (hex, rgb(), hsl(), hwb(), oklch(), oklab() or a CSS name).
+ * Kept under its original name. Translucent colors return null because contrast depends on the background.
+ */
+export function hexToRgb(input: string): [number, number, number] | null {
+  const c = parseColor(input);
+  return c && c.alpha >= 1 ? c.rgb : null;
+}
+
+/** Like hexToRgb but explains what went wrong. */
+export function requireColor(input: string, label: string): [number, number, number] {
+  const c = parseColor(input);
+  if (!c) throw new Error(`"${input}" (${label}) is not a color I can read. Use ${SUPPORTED_COLOR_FORMATS}.`);
+  if (c.alpha < 1) throw new Error(`"${input}" (${label}) is translucent, so its contrast depends on what is behind it. Pass the final opaque color instead.`);
+  return c.rgb;
 }
 
 function toHex(rgb: [number, number, number]): string {
@@ -77,6 +91,8 @@ export function suggestFix(fg: string, bg: string, required: number): string | u
 
 export function evaluatePairs(pairs: PairInput[]): PairResult[] {
   return pairs.map((p) => {
+    requireColor(p.foreground, `${p.element} foreground`);
+    requireColor(p.background, `${p.element} background`);
     const ratio = contrastRatio(p.foreground, p.background);
     const isUi = p.kind === "ui";
     const required = isUi || p.large_text ? 3 : 4.5;

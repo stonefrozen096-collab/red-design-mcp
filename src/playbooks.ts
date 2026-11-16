@@ -142,6 +142,27 @@ export const PLAYBOOKS: Playbook[] = [
       ),
   },
   {
+    name: "security-check",
+    title: "Security and privacy check",
+    description: "Review a site or front-end code for security and privacy problems, then fix what you can.",
+    args: [{ name: "target", description: "A page URL you own, or a path or description of the front-end code", required: true }],
+    build: (a) =>
+      L(
+        "Run a security and privacy check on " + a.target + " and fix what you can.",
+        RULE,
+        "Only check sites and code the user owns or has permission to review. Never repeat a secret you find; quote only its redacted preview.",
+        "",
+        isUrl(a.target)
+          ? "1. Call `audit_security` for the page and note the grade."
+          : "1. Call `audit_html` on the markup, and call `scan_secrets` on config files, .env examples and front-end bundles (pass their contents).",
+        "2. List the high and medium findings in priority order, each with the exact fix.",
+        "3. Call `generate_csp` (report-only first) and `generate_security_headers` for the user's host, and add them to the project's config.",
+        "4. If any secret was found, say it must be revoked and rotated, and that it remains in git history.",
+        isUrl(a.target) ? "5. After the fix is deployed, call `audit_security` again and report the grade before and after." : "5. Re-run the same checks after the changes and report the results.",
+        "6. Finish with what this review cannot cover, because it is a passive check and not a penetration test."
+      ),
+  },
+  {
     name: "polish-css",
     title: "Polish CSS to a high score",
     description: "Lint a stylesheet and iterate until it scores 90 or more.",

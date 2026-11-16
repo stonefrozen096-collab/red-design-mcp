@@ -12,10 +12,10 @@
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-22c55e?style=flat-square)](#contributing)
 
 ![MCP compatible](https://img.shields.io/badge/MCP-compatible-e11d48?style=flat-square)
-![31 tools](https://img.shields.io/badge/tools-31-e11d48?style=flat-square)
+![36 tools](https://img.shields.io/badge/tools-36-e11d48?style=flat-square)
 ![API key optional](https://img.shields.io/badge/API%20key-optional-22c55e?style=flat-square)
-![7 workflows](https://img.shields.io/badge/agent%20workflows-7-e11d48?style=flat-square)
-![13 agents](https://img.shields.io/badge/agents-13-D97757?style=flat-square)
+![8 workflows](https://img.shields.io/badge/agent%20workflows-8-e11d48?style=flat-square)
+![14 agents](https://img.shields.io/badge/agents-14-D97757?style=flat-square)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-supported-D97757?style=flat-square)
 ![Codex](https://img.shields.io/badge/Codex-supported-111827?style=flat-square)
 ![Cursor](https://img.shields.io/badge/Cursor-supported-000000?style=flat-square)
@@ -39,8 +39,9 @@ Analyze, recreate, reimagine, critique and audit **any design** straight from Cl
 | **No API key needed** | In host mode your AI tool does the seeing, so there is no second bill and no second key. |
 | **Math, not vibes** | Contrast ratios, palettes, color-blindness simulation, type scales and originality scores are computed in code, so they are exact and repeatable. |
 | **Whole design system in one call** | `generate_design_system` turns a brand color and a mood into palette, light and dark themes, fonts, fluid type, spacing, radii and shadows, with contrast verified. |
-| **Agents included** | 13 specialist agents for Claude Code, Cursor, Codex, Gemini CLI and Copilot (plus AGENTS.md), 7 one-command workflows, and an autonomous `audit_site`. |
+| **Agents included** | 14 agents for Claude Code, Cursor, Codex, Gemini CLI and Copilot (plus AGENTS.md), 8 one-command workflows, and an autonomous `audit_site`. |
 | **Reverse-engineer any website** | Point it at a URL: it reads the live CSS for tokens, lints it, or screenshots the page for the vision tools. |
+| **Security checks (Red Chex)** | Reviews headers, CSP, cookies, leaked secrets and trackers on a live page, then writes the fixes as ready-to-paste config. |
 | **Tools on demand** | Let your AI discover and run only the tools a task needs with `RED_TOOLS=auto`, or pin the groups you want yourself. |
 | **Inspiration dial** | Slide from a faithful rebuild (0) to a wild reinterpretation (100) and get up to 3 variations at once. |
 | **Accessible by default** | Recreations fix contrast, semantics and tap targets unless you say otherwise. |
@@ -66,9 +67,10 @@ npx red-design-mcp install                    # auto-detect your tools
 npx red-design-mcp install --client codex,cursor
 npx red-design-mcp install --all              # every supported client
 npx red-design-mcp install --print            # just show the config snippets
+npx red-design-mcp install --global           # use a globally installed binary (offline friendly)
 npx red-design-mcp doctor                     # check Node, mode and detected clients
 npx red-design-mcp doctor --check             # also confirm your model still exists
-npx red-design-mcp agents                     # install 13 design agents for your AI tools
+npx red-design-mcp agents                     # install 14 design agents for your AI tools
 ```
 
 **Claude Code**
@@ -130,6 +132,17 @@ These work on live websites.
 | `extract_css_tokens` | Read a site's real stylesheets (or pasted CSS) and extract **colors, fonts, sizes, radii, spacing and shadows**. No screenshot, no key. Export as JSON, CSS, Tailwind, W3C or Figma. |
 | `lint_css` | Score CSS on design quality: contrast, removed focus outlines, tiny text, color and font sprawl, off-grid spacing, missing reduced-motion, and drift from your tokens. |
 
+### Security tools (Red Chex)
+Red Chex is the security and privacy side of red-design-mcp. It is **defensive and passive**: `audit_security` sends one normal request to a public page and inspects what any visitor receives, and nothing is ever exploited or probed. Only check sites and code you own or have permission to review. These are not a substitute for a penetration test.
+
+| Tool | What it does |
+|---|---|
+| `audit_security` | Grades one public page (A to F): HTTPS and redirects, HSTS, Content-Security-Policy, clickjacking and other headers, cookie flags, mixed content, forms, third-party scripts without Subresource Integrity, leaked credentials in the markup, trackers, and information disclosure, with a fix for each. |
+| `scan_secrets` | Scans text you pass in (config, `.env` examples, front-end bundles) for API keys, tokens, private keys and passwords in connection strings. Findings show line and kind with a **redacted preview**; a full secret is never returned. |
+| `generate_csp` | Builds a Content-Security-Policy from a page's real markup, with **SHA-256 hashes for inline scripts and styles** so you can avoid `'unsafe-inline'`. Starts in report-only mode. |
+| `generate_security_headers` | Writes the recommended security headers as ready-to-paste config for **Netlify, Cloudflare Pages, Vercel, nginx, Apache, Caddy or Express**. Rejects input that could break out of the config file. |
+| `audit_html` | Static audit of markup for accessibility and quality: `lang`, title, viewport zoom, alt text, unlabeled fields, empty buttons and links, heading order, duplicate ids, and more. |
+
 ### Deterministic tools
 These never need a model or a key. Same input, same answer, instantly.
 
@@ -155,12 +168,14 @@ These never need a model or a key. Same input, same answer, instantly.
 | `generate_spacing_scale` | A consistent spacing scale from a 4px or 8px base, in rem or px. |
 | `originality_check` | Compare a source and your new design on palette, type, shape and spacing. Get a similarity score and tips to differentiate. |
 
+Anywhere a color is expected you can use hex (`#rgb`, `#rrggbb`, `#rrggbbaa`), `rgb()`, `hsl()`, `hwb()`, `oklch()`, `oklab()` or a CSS color name. Translucent colors are rejected with a clear message, because contrast depends on what is behind them.
+
 ## Agents
 
 red-design-mcp ships agents on three levels, so you pick how much to delegate.
 
 ### 1. Workflow prompts (any MCP client)
-Seven ready-made playbooks that tell your AI exactly which tools to run, in order, and how to report. In Claude Code they appear as slash commands such as `/mcp__red__redesign`.
+Eight ready-made playbooks that tell your AI exactly which tools to run, in order, and how to report. In Claude Code they appear as slash commands such as `/mcp__red__redesign`.
 
 | Workflow | What the agent does |
 |---|---|
@@ -171,10 +186,11 @@ Seven ready-made playbooks that tell your AI exactly which tools to run, in orde
 | `brand-refresh` | Extract the current look, build a new palette and fonts, compare old vs new. |
 | `design-review` | Senior-designer verdict plus the top 5 prioritized fixes. |
 | `polish-css` | Lint and fix in a loop until the CSS scores 90 or more. |
+| `security-check` | Audit headers, CSP, cookies and leaked secrets, then generate the fixes (report-only CSP first). |
 
 ### 2. Specialist agents for every major AI coding tool
 
-Every tool has its own agent format, so one command writes each agent in the native format of the tools you use. There are **13 agents**: 12 specialists for specific tasks, plus a **design lead** that handles everything else.
+Every tool has its own agent format, so one command writes each agent in the native format of the tools you use. There are **14 agents**: 13 specialists for specific tasks, plus a **design lead** that handles everything else.
 
 ```bash
 npx red-design-mcp agents                      # install into the tools it detects
@@ -215,6 +231,7 @@ The `AGENTS.md` block is wrapped in markers, so running the command again refres
 | `red-component-designer` | Accessible buttons, forms, input states and favicons. |
 | `red-dataviz-designer` | Color-blind-safe chart and graph palettes. |
 | `red-typography-designer` | Font pairings, type scales and text rhythm. |
+| `red-chex` | Security and privacy checks: headers, CSP, cookies, leaked secrets and trackers, then the fixes. |
 
 **The design lead, for everything else.** `red-design-lead` is the generalist. It classifies the task and picks the right specialist. For multi-part work it chains them in a sensible order (extract, then system, then components, then accessibility, then originality). If your tool supports subagents it delegates by name. If not, it follows that specialist's process itself.
 
@@ -351,21 +368,23 @@ Claude Code: `claude mcp add --scope user -e GEMINI_API_KEY=your-key red -- npx 
 | `RED_BASE_URL`, `RED_API_KEY` | Use any OpenAI-compatible endpoint. |
 | `RED_MAX_TOKENS` | Cap the reply length (default 16000, which leaves room for model thinking). |
 | `RED_TOOLS` | Load fewer tools. See [Choosing tools](#choosing-tools). |
+| `RED_ALLOW_PRIVATE_URLS` | Set to `1` to let tools fetch or capture `localhost` and private-network addresses. See [Security](#security). |
+| `RED_ALLOWED_DIRS` | Optional list of folders images may be read from (separated by `:` on Mac and Linux, `;` on Windows). See [Security](#security). |
 
 `npx red-design-mcp doctor` shows which provider and model are active, and `doctor --check` asks the provider whether that model is still available. Requests that hit a rate limit or a temporary server error are retried once automatically.
 
 ## Choosing tools
 
-red-design-mcp has 31 tools. Loading all of them is the default, but you can control what your AI sees, or let the AI choose for itself. Set `RED_TOOLS` in your client's `env`.
+red-design-mcp has 36 tools. Loading all of them is the default, but you can control what your AI sees, or let the AI choose for itself. Set `RED_TOOLS` in your client's `env`.
 
 | Mode | `RED_TOOLS` | What happens |
 |---|---|---|
-| Everything | unset, or `all` | All 31 tools load directly. |
+| Everything | unset, or `all` | All 36 tools load directly. |
 | You choose | `core`, `core,web`, `all,-capture_url` | Only the groups or tools you name load. |
 | The AI chooses | `auto` | Only two small tools load: `find_tools` and `run_tool`. The AI describes its task, gets the matching tools with their parameters, and runs them. |
 | Mixed | `core,auto` | The 9 core tools load directly and the AI discovers the rest on demand. |
 
-Groups: `core` (the 9 essentials), `vision`, `web`, `color`, `system`, `components`, `quality`. Combine groups with commas and exclude a tool with a dash.
+Groups: `core` (the 9 essentials), `vision`, `web`, `color`, `system`, `components`, `quality`, `security`. Combine groups with commas and exclude a tool with a dash.
 
 ```json
 {
@@ -404,6 +423,20 @@ Exact tools never call a model: contrast, palettes, scales and audits are comput
 
 A typical flow chains the tools: `analyze_design` → `extract_tokens` → `reimagine` → `audit_accessibility` → `originality_check`.
 
+## Security
+
+red-design-mcp runs on your machine with your permissions, and its tools are driven by an AI that can be misled by text it reads (prompt injection). These guards limit what a misled prompt can do.
+
+- **Images only.** Local files are read only if they are real PNG, JPEG, GIF or WebP images, checked by file extension and by file signature, and at most 20 MB. A text file, key or config cannot be read through the image tools, and symlinks are resolved before the check. To confine reads to specific folders, set `RED_ALLOWED_DIRS` (the capture folder is always allowed).
+- **No internal network.** URLs for image downloads, stylesheet reading and screenshots must resolve to public addresses. Loopback, private ranges, link-local addresses (including the `169.254.169.254` cloud metadata service) and reserved ranges are blocked, and every redirect is re-checked. In screenshots, each page request the browser makes is checked as well.
+- **Your own dev server.** To capture `localhost` or a private address, set `RED_ALLOW_PRIVATE_URLS=1`. Link-local and reserved addresses stay blocked even then.
+- **Size limits.** Downloaded pages and stylesheets are capped at 2 MB, and images at 20 MB.
+- **Safe installs.** `install` never rewrites a config it cannot parse (for example one with comments); it stops without changing anything. When it does edit a config it keeps your formatting, writes atomically, and never overwrites an earlier backup.
+
+Limits to know about: the address check happens just before each request, so a hostile DNS server that changes its answer between the check and the connection could in theory slip through. If that matters to you, run the server in a container or on a network without access to anything sensitive. Never put API keys in files you commit; keep them in your AI tool's `env` settings.
+
+**Offline or restricted networks.** `npx` downloads the package, so it needs access to the npm registry. Run `npm install -g red-design-mcp` once, then `red-design-mcp install --global` so your tools start the installed binary directly.
+
 ## Responsible use
 
 red-design-mcp is built to learn from **structure and style**, not to copy someone's brand. Recreations use neutral placeholders instead of logos or trademarked artwork, and `originality_check` helps you confirm your result is genuinely your own. It compares tokens only (not layout or content) and is not legal advice.
@@ -417,7 +450,8 @@ red-design-mcp is built to learn from **structure and style**, not to copy someo
 - [x] One-command installer and API-key-free host mode
 - [x] Multiple model providers: Anthropic, OpenAI, Gemini, Groq, OpenRouter and any OpenAI-compatible endpoint
 - [x] Complete design-system generator with light and dark themes
-- [x] Agent workflows, 13 specialist agents for five AI tools plus AGENTS.md, and an autonomous site audit
+- [x] Agent workflows, 14 agents for five AI tools plus AGENTS.md, and an autonomous site audit
+- [x] Red Chex security agent: header and privacy audit, secret scanner, CSP and security-header generators, HTML audit
 - [x] Capture screenshots from a URL and extract tokens from live CSS
 - [x] CSS design linter
 - [ ] Generate real Figma frames through the Figma API

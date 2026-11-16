@@ -20,7 +20,11 @@ import { findToolsText, runTool, type ToolEntry } from "./gateway.js";
 import { auditCss } from "./siteaudit.js";
 import { generateFavicon, generateFormStyles } from "./ui.js";
 import { registerPrompts } from "./prompts.js";
-import { assertHttp, collectCss } from "./web.js";
+import { assertPublicUrl, collectCss, fetchPage } from "./web.js";
+import { scanSecrets, formatSecretsReport } from "./secrets.js";
+import { auditHtml, formatHtmlAudit } from "./htmlscan.js";
+import { analyzeSecurity, formatSecurityReport } from "./security.js";
+import { HEADER_PLATFORMS, formatCsp, formatSecurityHeaders, generateCsp, generateSecurityHeaders } from "./csp.js";
 import { lintCss } from "./lint.js";
 import { VARIANTS, generateComponentStates } from "./states.js";
 import { generateGradient } from "./gradient.js";
@@ -34,11 +38,12 @@ const server = new McpServer({ name: "red-design-mcp", version: pkg.version });
 // Add "auto" to let the host model discover the remaining tools with find_tools and run_tool.
 const toolEnabled = parseToolset(process.env.RED_TOOLS);
 const registry: ToolEntry[] = [];
-const registerTool = server.registerTool.bind(server) as (...args: any[]) => unknown;
-(server as any).registerTool = (name: string, config: any, handler: any) => {
+
+/** Register a tool with the MCP server (if enabled) and remember it for the find_tools/run_tool gateway. */
+function defineTool(name: string, config: any, handler: (args: any, extra?: any) => any): void {
   registry.push({ name, config, handler });
-  return toolEnabled(name) ? registerTool(name, config, handler) : undefined;
-};
+  if (toolEnabled(name)) server.registerTool(name, config, handler);
+}
 
 /**
  * Host mode: with no API key configured, return the image(s) plus instructions so the
@@ -70,7 +75,7 @@ const ANALYZE_PROMPT = `You are a senior UI/UX designer. Analyze this design and
 }
 Use hex values for colors. Be specific and measurable.`;
 
-server.registerTool(
+defineTool(
   "analyze_design",
   {
     title: "Analyze Design",
@@ -101,7 +106,7 @@ const FORMATS = {
   tailwind: "a single HTML file using Tailwind utility classes via the Tailwind CDN script",
 } as const;
 
-server.registerTool(
+defineTool(
   "recreate",
   {
     title: "Recreate Design",
@@ -159,7 +164,7 @@ const DIRECTIONS = [
   "Direction C: lead with unconventional layout and interaction details.",
 ];
 
-server.registerTool(
+defineTool(
   "reimagine",
   {
     title: "Reimagine Design",
@@ -213,7 +218,7 @@ Rules:
   }
 );
 
-server.registerTool(
+defineTool(
   "extract_tokens",
   {
     title: "Extract Design Tokens",
@@ -248,7 +253,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "convert_tokens",
   {
     title: "Convert Design Tokens",
@@ -268,7 +273,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "check_contrast",
   {
     title: "Check Contrast",
@@ -276,17 +281,23 @@ server.registerTool(
     inputSchema: {
       pairs: z.array(z.object({
         element: z.string().describe("What the pair is, e.g. 'body text'"),
-        foreground: z.string().describe("Hex color"),
-        background: z.string().describe("Hex color"),
+        foreground: z.string().describe("Color: hex, rgb(), hsl(), hwb(), oklch(), oklab() or a CSS name (opaque)"),
+        background: z.string().describe("Color: hex, rgb(), hsl(), hwb(), oklch(), oklab() or a CSS name (opaque)"),
         large_text: z.boolean().default(false),
         kind: z.enum(["text", "ui"]).default("text"),
       })),
     },
   },
-  async ({ pairs }) => ({ content: [{ type: "text", text: formatReport(evaluatePairs(pairs)) }] })
+  async ({ pairs }) => {
+    try {
+      return { content: [{ type: "text", text: formatReport(evaluatePairs(pairs)) }] };
+    } catch (err) {
+      return fail("check_contrast", err);
+    }
+  }
 );
 
-server.registerTool(
+defineTool(
   "audit_accessibility",
   {
     title: "Audit Accessibility",
@@ -316,7 +327,7 @@ const fail = (tool: string, err: unknown) => ({
   content: [{ type: "text" as const, text: `${tool} failed: ${(err as Error).message}` }],
 });
 
-server.registerTool(
+defineTool(
   "generate_palette",
   {
     title: "Generate Color Palette",
@@ -341,7 +352,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "simulate_colorblind",
   {
     title: "Simulate Color Blindness",
@@ -363,7 +374,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "generate_type_scale",
   {
     title: "Generate Type Scale",
@@ -393,7 +404,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "originality_check",
   {
     title: "Originality Check",
@@ -415,7 +426,7 @@ server.registerTool(
 
 /* ---------------------------------- Vision tools --------------------------------- */
 
-server.registerTool(
+defineTool(
   "critique_design",
   {
     title: "Critique Design",
@@ -442,7 +453,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "design_to_prompt",
   {
     title: "Design to Prompt",
@@ -467,7 +478,7 @@ server.registerTool(
 
 /* ------------------------------ Design system toolkit ------------------------------ */
 
-server.registerTool(
+defineTool(
   "generate_design_system",
   {
     title: "Generate Design System",
@@ -506,7 +517,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "suggest_font_pairings",
   {
     title: "Suggest Font Pairings",
@@ -519,7 +530,7 @@ server.registerTool(
   async ({ mood, count }) => ({ content: [{ type: "text", text: formatPairings(mood, count) }] })
 );
 
-server.registerTool(
+defineTool(
   "generate_shadows",
   {
     title: "Generate Shadow Scale",
@@ -542,7 +553,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "generate_spacing_scale",
   {
     title: "Generate Spacing Scale",
@@ -560,7 +571,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "generate_dark_theme",
   {
     title: "Generate Dark Theme",
@@ -578,7 +589,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "contrast_matrix",
   {
     title: "Contrast Matrix",
@@ -596,7 +607,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "compare_designs",
   {
     title: "Compare Designs",
@@ -624,7 +635,7 @@ server.registerTool(
 
 const fenceOf = (lang: string, body: string) => `${"`".repeat(3)}${lang}\n${body}\n${"`".repeat(3)}`;
 
-server.registerTool(
+defineTool(
   "extract_css_tokens",
   {
     title: "Extract Tokens from CSS or a Website",
@@ -661,7 +672,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "lint_css",
   {
     title: "Lint CSS for Design Quality",
@@ -684,7 +695,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "generate_component_states",
   {
     title: "Generate Button States",
@@ -705,7 +716,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "generate_gradient",
   {
     title: "Generate Smooth Gradient",
@@ -728,7 +739,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "generate_motion_tokens",
   {
     title: "Generate Motion Tokens",
@@ -738,7 +749,7 @@ server.registerTool(
   async ({ style }) => ({ content: [{ type: "text", text: fenceOf("css", motionCss(style)) }] })
 );
 
-server.registerTool(
+defineTool(
   "generate_layout_system",
   {
     title: "Generate Layout System",
@@ -760,7 +771,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "capture_url",
   {
     title: "Capture Website Screenshot",
@@ -777,7 +788,7 @@ server.registerTool(
   async ({ url, width, height, full_page, mobile }) => {
     let browser: any;
     try {
-      const target = assertHttp(url);
+      const target = await assertPublicUrl(url);
       const spec = "playwright-core";
       const pw: any = await import(spec).catch(() => null);
       if (!pw) throw new Error("playwright-core is not installed. Run: npm install -g playwright-core (or reinstall red-design-mcp with optional dependencies).");
@@ -795,6 +806,15 @@ server.registerTool(
         viewport: { width: mobile ? 390 : width, height: mobile ? 844 : height },
         deviceScaleFactor: mobile ? 2 : 1,
         isMobile: mobile,
+      });
+      // The browser follows redirects and loads sub-resources on its own, so check each request's host too.
+      const verdicts = new Map<string, Promise<boolean>>();
+      await page.route("**/*", async (route: any) => {
+        const reqUrl: string = route.request().url();
+        if (!/^https?:/i.test(reqUrl)) return route.continue();
+        const host = new URL(reqUrl).hostname;
+        if (!verdicts.has(host)) verdicts.set(host, assertPublicUrl(reqUrl).then(() => true, () => false));
+        return (await verdicts.get(host)) ? route.continue() : route.abort("blockedbyclient");
       });
       await page.goto(target.href, { waitUntil: "load", timeout: 30000 });
       await page.waitForTimeout(800);
@@ -817,7 +837,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "audit_site",
   {
     title: "Audit Site",
@@ -839,7 +859,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "generate_form_styles",
   {
     title: "Generate Form Styles",
@@ -860,7 +880,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "generate_favicon",
   {
     title: "Generate Favicon",
@@ -890,7 +910,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+defineTool(
   "generate_chart_palette",
   {
     title: "Generate Chart Palette",
@@ -920,6 +940,128 @@ server.registerTool(
   }
 );
 
+
+/* ------------------------------ Red Chex: security tools ------------------------------ */
+
+defineTool(
+  "audit_security",
+  {
+    title: "Security and Privacy Check",
+    description:
+      "Red Chex: a passive security and privacy review of one public web page. Sends a single normal GET request, then checks HTTPS and redirects, HSTS, Content-Security-Policy, clickjacking and other security headers, cookie flags, mixed content, forms, third-party scripts without Subresource Integrity, leaked credentials in the markup, trackers and information disclosure. Returns a grade and fixes. It inspects only what any visitor receives and does not test for vulnerabilities. Only check sites you own or may review. Deterministic, no API key needed.",
+    inputSchema: { url: z.string().describe("Page URL, for example https://example.com (https:// is assumed if omitted)") },
+  },
+  async ({ url }: { url: string }) => {
+    try {
+      const page = await fetchPage(url);
+      const input = { url: page.requestedUrl, finalUrl: page.finalUrl, status: page.status, chain: page.chain, headers: page.headers, setCookies: page.setCookies, body: page.body, contentType: page.contentType };
+      return { content: [{ type: "text", text: formatSecurityReport(analyzeSecurity(input), input) }] };
+    } catch (err) {
+      return fail("audit_security", err);
+    }
+  }
+);
+
+defineTool(
+  "scan_secrets",
+  {
+    title: "Scan for Leaked Secrets",
+    description:
+      "Red Chex: scan text you pass in (file contents, config, HTML, JavaScript, CSS) for credentials that must not be committed or served: API keys for AWS, GitHub, Stripe, Slack, Anthropic, OpenAI, Groq, Google and others, private keys, JWTs, passwords in connection strings and hard-coded secret assignments. Findings show the line, the kind and a redacted preview; a full secret is never returned. Deterministic, no API key needed.",
+    inputSchema: {
+      text: z.string().describe("The text or file contents to scan (up to 1 MB)"),
+      label: z.string().optional().describe("What this text is, for the report, for example .env.example or app.js"),
+    },
+  },
+  async ({ text, label }: { text: string; label?: string }) => ({ content: [{ type: "text", text: formatSecretsReport(scanSecrets(text), label ?? "the text") }] })
+);
+
+defineTool(
+  "generate_csp",
+  {
+    title: "Generate Content-Security-Policy",
+    description:
+      "Red Chex: build a Content-Security-Policy from a page's real markup. Reads the scripts, styles, images, fonts, frames and forms it uses, computes SHA-256 hashes for inline scripts and styles so you can avoid 'unsafe-inline', and starts in report-only mode. Give a url or paste html. Only discovers resources written in the HTML. Deterministic, no API key needed.",
+    inputSchema: {
+      url: z.string().optional().describe("Page URL to read the markup from"),
+      html: z.string().optional().describe("HTML to analyze instead of a URL"),
+      page_url: z.string().optional().describe("With html: the page's own URL, so same-origin resources become 'self'"),
+      mode: z.enum(["report-only", "enforce"]).default("report-only"),
+      allow_inline_style_attributes: z.boolean().default(true).describe("Allow style=\"\" attributes via style-src-attr"),
+    },
+  },
+  async ({ url, html, page_url, mode, allow_inline_style_attributes }: { url?: string; html?: string; page_url?: string; mode: "report-only" | "enforce"; allow_inline_style_attributes: boolean }) => {
+    try {
+      if (!url && !html) throw new Error("Provide a url or html.");
+      let markup = html ?? "";
+      let pageUrl = page_url;
+      if (!html && url) {
+        const page = await fetchPage(url);
+        if (!page.body) throw new Error(`That URL did not return an HTML page (content-type: ${page.contentType || "unknown"}).`);
+        markup = page.body;
+        pageUrl = page.finalUrl;
+      }
+      return { content: [{ type: "text", text: formatCsp(generateCsp(markup, { pageUrl, mode, allowInlineStyleAttributes: allow_inline_style_attributes })) }] };
+    } catch (err) {
+      return fail("generate_csp", err);
+    }
+  }
+);
+
+defineTool(
+  "generate_security_headers",
+  {
+    title: "Generate Security Headers",
+    description:
+      "Red Chex: write the recommended security headers (HSTS, nosniff, clickjacking protection, Referrer-Policy, Permissions-Policy, Cross-Origin-Opener-Policy and optionally your CSP) as ready-to-paste config for Netlify, Cloudflare Pages, Vercel, nginx, Apache, Caddy or Express. Rejects input that could break out of the config file. Deterministic, no API key needed.",
+    inputSchema: {
+      platform: z.enum(HEADER_PLATFORMS),
+      csp: z.string().optional().describe("A Content-Security-Policy value, for example from generate_csp"),
+      csp_mode: z.enum(["report-only", "enforce"]).default("report-only"),
+      hsts_preload: z.boolean().default(false).describe("Adds the preload flag. Very hard to undo, so off by default"),
+      frame: z.enum(["deny", "sameorigin"]).default("deny"),
+      isolate_cross_origin: z.boolean().default(false).describe("Adds Cross-Origin-Resource-Policy: same-site, which stops other sites embedding your assets"),
+    },
+  },
+  async ({ platform, csp, csp_mode, hsts_preload, frame, isolate_cross_origin }: { platform: (typeof HEADER_PLATFORMS)[number]; csp?: string; csp_mode: "report-only" | "enforce"; hsts_preload: boolean; frame: "deny" | "sameorigin"; isolate_cross_origin: boolean }) => {
+    try {
+      const out = generateSecurityHeaders(platform, { csp, cspMode: csp_mode, hstsPreload: hsts_preload, frame, isolateCrossOrigin: isolate_cross_origin });
+      return { content: [{ type: "text", text: formatSecurityHeaders(platform, out) }] };
+    } catch (err) {
+      return fail("generate_security_headers", err);
+    }
+  }
+);
+
+defineTool(
+  "audit_html",
+  {
+    title: "Audit HTML",
+    description:
+      "Static audit of HTML markup (pasted or from a URL) for accessibility and quality: lang, title, viewport zoom, image alt text, unlabeled form fields, empty buttons and links, heading order, duplicate ids, positive tabindex, iframe titles, autoplay, table headers and render-blocking scripts. Returns a score and fixes. It cannot judge color contrast; use audit_accessibility or lint_css for that. Deterministic, no API key needed.",
+    inputSchema: {
+      html: z.string().optional().describe("HTML to audit"),
+      url: z.string().optional().describe("Page URL to read the HTML from"),
+    },
+  },
+  async ({ html, url }: { html?: string; url?: string }) => {
+    try {
+      if (!html && !url) throw new Error("Provide html or a url.");
+      let markup = html ?? "";
+      let label = "the pasted HTML";
+      if (!html && url) {
+        const page = await fetchPage(url);
+        if (!page.body) throw new Error(`That URL did not return an HTML page (content-type: ${page.contentType || "unknown"}).`);
+        markup = page.body;
+        label = page.finalUrl;
+      }
+      return { content: [{ type: "text", text: formatHtmlAudit(auditHtml(markup), label) }] };
+    } catch (err) {
+      return fail("audit_html", err);
+    }
+  }
+);
+
 function registerGateway(hidden: ToolEntry[]): void {
   const validate = (shape: any, args: unknown) => {
     const r = z.object(shape).safeParse(args);
@@ -936,7 +1078,7 @@ function registerGateway(hidden: ToolEntry[]): void {
     }
   };
 
-  registerTool(
+  server.registerTool(
     "find_tools",
     {
       title: "Find red design tools",
@@ -952,7 +1094,7 @@ function registerGateway(hidden: ToolEntry[]): void {
     })
   );
 
-  registerTool(
+  server.registerTool(
     "run_tool",
     {
       title: "Run a red design tool",

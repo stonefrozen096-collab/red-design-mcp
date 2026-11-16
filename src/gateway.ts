@@ -106,6 +106,13 @@ const SYNONYMS: Record<string, string[]> = {
   redesign: ["reimagine"], restyle: ["reimagine"], reimagine: ["reimagine", "style"], style: ["reimagine"], remix: ["reimagine"], variation: ["reimagine"],
   analyze: ["analyze", "spec"], inspect: ["analyze"], describe: ["analyze"],
   system: ["design", "system"], starter: ["system"], scale: ["scale"], ratio: ["type", "scale"],
+  check: ["audit"], verify: ["audit"], validate: ["audit"], grade: ["audit"], write: ["generate"], create: ["generate"], build: ["generate"], config: ["generate"], configure: ["generate"], snippet: ["generate"],
+  security: ["security"], secure: ["security", "audit"], safe: ["security"], vulnerability: ["security"], harden: ["security", "header"], hardening: ["security", "header"],
+  csp: ["csp", "policy", "security"], policy: ["csp"], header: ["header", "security"], hsts: ["header", "security"], cookie: ["security", "cookie"],
+  xss: ["csp", "security"], clickjacking: ["csp", "header", "security"], owasp: ["security"], cors: ["security", "header"], sri: ["security"], integrity: ["security"],
+  secret: ["secret", "scan"], leak: ["secret", "scan"], leaked: ["secret", "scan"], credential: ["secret", "scan"], password: ["secret", "scan"], apikey: ["secret", "scan"],
+  privacy: ["privacy", "tracker", "security"], tracker: ["privacy", "security"], gdpr: ["privacy", "tracker", "security"], mixed: ["security"], nginx: ["security", "header"], apache: ["security", "header"], netlify: ["security", "header"], vercel: ["security", "header"], caddy: ["security", "header"], helmet: ["security", "header"],
+  seo: ["html", "audit"], markup: ["html", "audit"], semantic: ["html", "audit"], landmark: ["html", "audit"], alt: ["html", "audit", "accessibility"],
 };
 
 function expand(tokens: string[]): string[] {

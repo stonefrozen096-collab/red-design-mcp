@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -10,9 +10,15 @@ const NAME = "red";
 const PKG = "red-design-mcp";
 const isWin = platform() === "win32";
 
-const launcher = isWin
-  ? { command: "cmd", args: ["/c", "npx", "-y", PKG] }
-  : { command: "npx", args: ["-y", PKG] };
+type Launcher = { command: string; args: string[] };
+
+/** How AI tools start the server: through npx (default), or the globally installed binary (offline friendly). */
+function launcherFor(globalBin = false): Launcher {
+  if (globalBin) return isWin ? { command: "cmd", args: ["/c", PKG] } : { command: PKG, args: [] };
+  return isWin ? { command: "cmd", args: ["/c", "npx", "-y", PKG] } : { command: "npx", args: ["-y", PKG] };
+}
+
+const tomlArgs = (l: Launcher) => `[${l.args.map((a) => JSON.stringify(a)).join(", ")}]`;
 
 export type Client = "claude-code" | "codex" | "cursor" | "claude-desktop";
 const ALL: Client[] = ["claude-code", "codex", "cursor", "claude-desktop"];
@@ -48,41 +54,76 @@ export function detect(): Client[] {
 }
 
 function backup(file: string): void {
-  if (existsSync(file)) copyFileSync(file, file + ".bak");
+  if (!existsSync(file)) return;
+  let target = `${file}.bak`;
+  for (let i = 1; existsSync(target) && i < 50; i++) target = `${file}.bak.${i}`; // keep the earliest backup intact
+  copyFileSync(file, target);
 }
 
-function installJson(file: string): string {
+/** Write to a temp file, then rename, so a crash can never leave a half-written config. */
+function writeAtomic(file: string, text: string): void {
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tmp, text);
+    renameSync(tmp, file);
+  } catch (err) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* temp file already gone */
+    }
+    throw err;
+  }
+}
+
+function installJson(file: string, launcher: Launcher): string {
   let cfg: any = {};
+  let raw = "";
   if (existsSync(file)) {
-    const raw = readFileSync(file, "utf8").trim();
-    if (raw) {
+    raw = readFileSync(file, "utf8");
+    if (raw.trim()) {
       try {
         cfg = JSON.parse(raw);
       } catch {
-        throw new Error(`${file} is not valid JSON. Fix it or add the server manually (run with --print).`);
+        throw new Error(
+          `${file} contains comments, trailing commas or other non-standard JSON that this installer cannot rewrite without losing them. Nothing was changed. Add the server by hand instead (run: npx red-design-mcp install --print).`
+        );
       }
     }
   }
+  if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg)) throw new Error(`${file} is not a JSON object. Nothing was changed.`);
+  if (cfg.mcpServers !== undefined && (cfg.mcpServers === null || typeof cfg.mcpServers !== "object" || Array.isArray(cfg.mcpServers))) {
+    throw new Error(`"mcpServers" in ${file} is not an object. Nothing was changed.`);
+  }
   cfg.mcpServers ??= {};
   if (cfg.mcpServers[NAME]) return "already installed";
+
+  // Keep the user's indentation, line endings and trailing newline.
+  const indentMatch = raw.match(/^([ \t]+)"/m);
+  const indent: string | number = indentMatch ? (indentMatch[1].includes("\t") ? "\t" : indentMatch[1].length) : 2;
+  const crlf = raw.includes("\r\n");
+  const trailingNewline = !raw || raw.endsWith("\n");
+  cfg.mcpServers[NAME] = launcher;
+  let out = JSON.stringify(cfg, null, indent) + (trailingNewline ? "\n" : "");
+  if (crlf) out = out.replace(/\n/g, "\r\n");
+
   backup(file);
   mkdirSync(dirname(file), { recursive: true });
-  cfg.mcpServers[NAME] = launcher;
-  writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");
+  writeAtomic(file, out);
   return `added to ${file}`;
 }
 
-function installCodex(file: string): string {
+function installCodex(file: string, launcher: Launcher): string {
   const current = existsSync(file) ? readFileSync(file, "utf8") : "";
   if (current.includes(`[mcp_servers.${NAME}]`)) return "already installed";
   backup(file);
   mkdirSync(dirname(file), { recursive: true });
-  const block = `\n[mcp_servers.${NAME}]\ncommand = "${launcher.command}"\nargs = [${launcher.args.map((a) => JSON.stringify(a)).join(", ")}]\n`;
-  writeFileSync(file, current + block);
+  const block = `\n[mcp_servers.${NAME}]\ncommand = "${launcher.command}"\nargs = ${tomlArgs(launcher)}\n`;
+  writeAtomic(file, current + block);
   return `added to ${file}`;
 }
 
-function installClaudeCode(): string {
+function installClaudeCode(launcher: Launcher): string {
   const r = spawnSync("claude", ["mcp", "add", "--scope", "user", NAME, "--", launcher.command, ...launcher.args], {
     encoding: "utf8",
     shell: isWin,
@@ -93,14 +134,49 @@ function installClaudeCode(): string {
   throw new Error(out || "`claude mcp add` failed");
 }
 
-export function installClient(client: Client): string {
+export function installClient(client: Client, opts: { global?: boolean } = {}): string {
   const p = paths();
+  const launcher = launcherFor(opts.global);
   switch (client) {
-    case "claude-code": return installClaudeCode();
-    case "codex": return installCodex(p.codex);
-    case "cursor": return installJson(p.cursor);
-    case "claude-desktop": return installJson(p["claude-desktop"]);
+    case "claude-code": return installClaudeCode(launcher);
+    case "codex": return installCodex(p.codex, launcher);
+    case "cursor": return installJson(p.cursor, launcher);
+    case "claude-desktop": return installJson(p["claude-desktop"], launcher);
   }
+}
+
+export interface ClientStatus {
+  client: Client;
+  status: "installed" | "not-installed" | "no-config" | "invalid-config" | "not-inspected";
+  detail: string;
+}
+
+/** What doctor reports: is red configured in each detected tool, and is that tool's config readable? */
+export function inspectClients(clients: Client[] = detect()): ClientStatus[] {
+  const p = paths();
+  return clients.map((client): ClientStatus => {
+    if (client === "claude-code") return { client, status: "not-inspected", detail: "managed by Claude Code itself; run: claude mcp list" };
+    const file = client === "codex" ? p.codex : client === "cursor" ? p.cursor : p["claude-desktop"];
+    if (!existsSync(file)) return { client, status: "no-config", detail: `no config file yet (${file})` };
+    let raw: string;
+    try {
+      raw = readFileSync(file, "utf8");
+    } catch (err) {
+      return { client, status: "invalid-config", detail: `cannot read ${file}: ${(err as Error).message}` };
+    }
+    if (client === "codex") {
+      return raw.includes(`[mcp_servers.${NAME}]`)
+        ? { client, status: "installed", detail: file }
+        : { client, status: "not-installed", detail: file };
+    }
+    if (!raw.trim()) return { client, status: "not-installed", detail: `${file} is empty` };
+    try {
+      const cfg = JSON.parse(raw);
+      return cfg?.mcpServers?.[NAME] ? { client, status: "installed", detail: file } : { client, status: "not-installed", detail: file };
+    } catch (err) {
+      return { client, status: "invalid-config", detail: `${file} is not valid JSON (${(err as Error).message})` };
+    }
+  });
 }
 
 export const AGENT_LABELS: Record<AgentTargetOrMd, string> = {
@@ -163,7 +239,6 @@ export function installAgentsMd(file: string): string {
   return start !== -1 ? `updated ${file}` : `added to ${file}`;
 }
 
-const SNIPPET = JSON.stringify({ mcpServers: { [NAME]: launcher } }, null, 2);
 
 const HELP = `red-design-mcp: recreate and reimagine any design (MCP server)
 
@@ -172,8 +247,9 @@ Usage:
   npx red-design-mcp install --client codex,cursor
   npx red-design-mcp install --all      Install into every supported client
   npx red-design-mcp install --print    Only print the config snippets
+  npx red-design-mcp install --global   Use the globally installed binary instead of npx (works offline after: npm i -g red-design-mcp)
   npx red-design-mcp doctor             Check setup and mode (add --check to confirm your model exists)
-  npx red-design-mcp agents             Install 13 design agents into the AI tools it detects
+  npx red-design-mcp agents             Install 14 design agents into the AI tools it detects
   npx red-design-mcp agents --target claude,cursor,codex,gemini,copilot,agents-md
   npx red-design-mcp agents --all       Every supported tool (AGENTS.md goes in the current folder)
   npx red-design-mcp agents --project   Install into this project instead of your home folder
@@ -212,6 +288,7 @@ export async function runCli(args: string[]): Promise<void> {
       ? `API mode (${prov.label}, model ${prov.model || "NOT SET: set RED_MODEL"})`
       : "Host mode (no key needed)";
     console.log(`Node: ${process.version}`);
+    if (Number(process.versions.node.split(".")[0]) < 18) console.log("Warning: Node 18 or newer is required.");
     console.log(`Mode: ${mode}`);
     if (process.env.RED_PROVIDER && !prov) console.log(`Warning: RED_PROVIDER=${process.env.RED_PROVIDER} has no matching key or is not a known provider (anthropic, openai, google, groq, openrouter, custom).`);
     const enabled = ALL_TOOLS.filter(parseToolset(process.env.RED_TOOLS));
@@ -224,6 +301,10 @@ export async function runCli(args: string[]): Promise<void> {
     if (bad.length) console.log(`Warning: unknown RED_TOOLS entries: ${bad.join(", ")}`);
     const found = detect();
     console.log(`Detected clients: ${found.length ? found.join(", ") : "none"}`);
+    for (const c of inspectClients(found)) {
+      const label = { installed: "red is installed", "not-installed": "red is not installed", "no-config": "no config yet", "invalid-config": "CONFIG PROBLEM", "not-inspected": "not inspected" }[c.status];
+      console.log(`  ${c.client}: ${label} (${c.detail})`);
+    }
     if (args.includes("--check")) {
       if (!prov) console.log("Model check: skipped (host mode, no provider configured)");
       else if (!prov.model) console.log("Model check: set RED_MODEL first");
@@ -293,10 +374,12 @@ export async function runCli(args: string[]): Promise<void> {
     return;
   }
 
+  const globalBin = args.includes("--global");
   if (args.includes("--print")) {
-    console.log(`Claude Code:\n  claude mcp add --scope user ${NAME} -- ${[launcher.command, ...launcher.args].join(" ")}\n`);
-    console.log(`Codex (~/.codex/config.toml):\n  [mcp_servers.${NAME}]\n  command = "${launcher.command}"\n  args = [${launcher.args.map((a) => JSON.stringify(a)).join(", ")}]\n`);
-    console.log(`Cursor / Claude Desktop / others (JSON):\n${SNIPPET}`);
+    const l = launcherFor(globalBin);
+    console.log(`Claude Code:\n  claude mcp add --scope user ${NAME} -- ${[l.command, ...l.args].join(" ")}\n`);
+    console.log(`Codex (~/.codex/config.toml):\n  [mcp_servers.${NAME}]\n  command = "${l.command}"\n  args = ${tomlArgs(l)}\n`);
+    console.log(`Cursor / Claude Desktop / others (JSON):\n${JSON.stringify({ mcpServers: { [NAME]: l } }, null, 2)}`);
     return;
   }
 
@@ -317,13 +400,13 @@ export async function runCli(args: string[]): Promise<void> {
   let failed = false;
   for (const c of targets) {
     try {
-      console.log(`  ok   ${c}: ${installClient(c)}`);
+      console.log(`  ok   ${c}: ${installClient(c, { global: globalBin })}`);
     } catch (err) {
       failed = true;
       console.log(`  fail ${c}: ${(err as Error).message}`);
     }
   }
   console.log("\nDone. Restart your AI tool, then ask it to analyze or recreate a design image.");
-  console.log("Tip: run `npx red-design-mcp agents` to add 13 design agents for Claude Code, Cursor, Codex, Gemini CLI and Copilot.");
+  console.log("Tip: run `npx red-design-mcp agents` to add 14 design agents for Claude Code, Cursor, Codex, Gemini CLI and Copilot.");
   if (failed) process.exitCode = 1;
 }

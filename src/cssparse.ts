@@ -1,63 +1,175 @@
-import { hslToRgb, normalizeHex, rgbToHex, rgbToHsl } from "./color.js";
+import { parseColor } from "./colorparse.js";
+import { rgbToHex, rgbToHsl } from "./color.js";
 import type { Tokens } from "./tokens.js";
 
 export interface Rule {
   selector: string;
   decls: [string, string][];
+  /** At-rule preludes this rule sits inside, e.g. "@media (prefers-color-scheme: dark)". */
+  context?: string[];
 }
 
 export const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
 
-export function parseRules(raw: string): Rule[] {
-  const css = stripComments(raw);
-  const rules: Rule[] = [];
-  const re = /([^{}]+)\{([^{}]*)\}/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(css))) {
-    const selector = m[1].trim();
-    if (!selector || selector.startsWith("@")) continue;
-    const body = m[2].replace(/url\([^)]*\)/gi, "url()");
-    const decls: [string, string][] = [];
-    for (const part of body.split(";")) {
-      const i = part.indexOf(":");
-      if (i < 1) continue;
-      decls.push([part.slice(0, i).trim().toLowerCase(), part.slice(i + 1).replace(/!important/i, "").trim()]);
-    }
-    rules.push({ selector, decls });
-  }
-  return rules;
+interface Node {
+  prelude: string;
+  decls: [string, string][];
+  children: Node[];
 }
 
-const HEX = /#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})(?![0-9a-z_-])/gi;
-const RGB = /rgba?\(\s*(\d{1,3}(?:\.\d+)?)\s*[, ]\s*(\d{1,3}(?:\.\d+)?)\s*[, ]\s*(\d{1,3}(?:\.\d+)?)\s*(?:[,/]\s*([\d.]+%?)\s*)?\)/gi;
-const HSL = /hsla?\(\s*([\d.]+)(?:deg)?\s*[, ]\s*([\d.]+)%\s*[, ]\s*([\d.]+)%\s*(?:[,/]\s*([\d.]+%?)\s*)?\)/gi;
+const MAX_DEPTH = 64;
 
-const opaque = (a: string | undefined) => {
-  if (a === undefined) return true;
-  const v = a.endsWith("%") ? parseFloat(a) / 100 : parseFloat(a);
-  return v >= 1;
-};
+/**
+ * A small CSS tokenizer-parser. It understands strings, url(), comments, nested rules (CSS nesting),
+ * at-rule blocks and custom properties whose values contain braces, which a flat regex cannot.
+ */
+function parseBlock(css: string, start: number, depth: number): { decls: [string, string][]; children: Node[]; end: number } {
+  if (depth > MAX_DEPTH) throw new Error("CSS is nested too deeply to analyze.");
+  const decls: [string, string][] = [];
+  const children: Node[] = [];
+  const n = css.length;
+  let i = start;
+  let buf = "";
+
+  const pushDecl = () => {
+    const t = buf.trim();
+    buf = "";
+    if (!t || t.startsWith("@")) return;
+    const c = t.indexOf(":");
+    if (c < 1) return;
+    const prop = t.slice(0, c).trim().toLowerCase();
+    if (!/^(--[\w-]+|-?[a-z][\w-]*)$/.test(prop)) return;
+    decls.push([prop, t.slice(c + 1).replace(/!important/gi, "").trim()]);
+  };
+
+  while (i < n) {
+    const ch = css[i];
+    if (ch === "/" && css[i + 1] === "*") {
+      const e = css.indexOf("*/", i + 2);
+      i = e === -1 ? n : e + 2;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < n && css[j] !== ch) {
+        if (css[j] === "\\") j++;
+        j++;
+      }
+      buf += css.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if ((ch === "u" || ch === "U") && css.slice(i, i + 4).toLowerCase() === "url(" && (i === 0 || !/[\w-]/.test(css[i - 1]))) {
+      let j = i + 4;
+      while (j < n && /\s/.test(css[j])) j++;
+      if (css[j] === '"' || css[j] === "'") {
+        const q = css[j++];
+        while (j < n && css[j] !== q) {
+          if (css[j] === "\\") j++;
+          j++;
+        }
+      }
+      while (j < n && css[j] !== ")") j++;
+      buf += "url()"; // contents (data URLs, paths) are irrelevant and may contain braces or colors
+      i = j + 1;
+      continue;
+    }
+    if (ch === "{") {
+      const pre = buf.trim();
+      if (/^--[\w-]+\s*:$/.test(pre)) {
+        let d = 1;
+        let j = i + 1;
+        while (j < n && d > 0) {
+          if (css[j] === "{") d++;
+          else if (css[j] === "}") d--;
+          j++;
+        }
+        decls.push([pre.slice(0, pre.indexOf(":")).trim().toLowerCase(), css.slice(i, j).trim()]);
+        buf = "";
+        i = j;
+        continue;
+      }
+      const inner = parseBlock(css, i + 1, depth + 1);
+      children.push({ prelude: pre, decls: inner.decls, children: inner.children });
+      buf = "";
+      i = inner.end + 1;
+      continue;
+    }
+    if (ch === "}") {
+      pushDecl();
+      return { decls, children, end: i };
+    }
+    if (ch === ";") {
+      pushDecl();
+      i++;
+      continue;
+    }
+    buf += ch;
+    i++;
+  }
+  pushDecl();
+  return { decls, children, end: n };
+}
+
+const GROUPING_AT_RULES = new Set(["media", "supports", "layer", "container", "scope", "document", "starting-style"]);
+
+function splitTopLevel(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of s) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth--;
+    if (ch === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+function flatten(nodes: Node[], parent: string[] | null, ctx: string[], out: Rule[]): void {
+  for (const node of nodes) {
+    if (node.prelude.startsWith("@")) {
+      const name = node.prelude.slice(1).split(/[\s(]/)[0].toLowerCase();
+      if (!GROUPING_AT_RULES.has(name)) continue; // @keyframes, @font-face, @property ... are not style rules
+      const next = [...ctx, node.prelude];
+      if (node.decls.length && parent) out.push({ selector: parent.join(", "), decls: node.decls, context: next });
+      flatten(node.children, parent, next, out);
+    } else {
+      const own = splitTopLevel(node.prelude);
+      const sels = parent ? parent.flatMap((p) => own.map((c) => (c.includes("&") ? c.replace(/&/g, p) : `${p} ${c}`))) : own;
+      if (node.decls.length) out.push({ selector: sels.join(", "), decls: node.decls, context: ctx });
+      flatten(node.children, sels, ctx, out);
+    }
+  }
+}
+
+export function parseRules(css: string): Rule[] {
+  const nodes: Node[] = [];
+  let i = 0;
+  while (i < css.length) {
+    const r = parseBlock(css, i, 0);
+    nodes.push(...r.children);
+    i = r.end + 1; // continue past a stray closing brace
+  }
+  const out: Rule[] = [];
+  flatten(nodes, null, [], out);
+  return out;
+}
+
+const HEX_RE = /#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})(?![0-9a-z_-])/gi;
+const FUNC_RE = /(?<![\w-])(?:rgba?|hsla?|hwb|oklch|oklab)\([^()]*\)/gi;
 
 /** Opaque color literals in a CSS value, as normalized #rrggbb. Translucent colors are skipped. */
 export function colorsIn(value: string): string[] {
   const out: string[] = [];
-  for (const m of value.matchAll(HEX)) {
-    let h = m[1];
-    if (h.length === 4 || h.length === 8) {
-      const alpha = h.length === 4 ? h[3] + h[3] : h.slice(6);
-      if (alpha.toLowerCase() !== "ff") continue;
-      h = h.length === 4 ? h.slice(0, 3) : h.slice(0, 6);
+  for (const re of [HEX_RE, FUNC_RE]) {
+    for (const m of value.matchAll(re)) {
+      const c = parseColor(m[0]);
+      if (c && c.alpha >= 1) out.push(rgbToHex(c.rgb));
     }
-    const hex = normalizeHex("#" + h);
-    if (hex) out.push(hex);
-  }
-  for (const m of value.matchAll(RGB)) {
-    if (!opaque(m[4])) continue;
-    out.push(rgbToHex([Number(m[1]), Number(m[2]), Number(m[3])]));
-  }
-  for (const m of value.matchAll(HSL)) {
-    if (!opaque(m[4])) continue;
-    out.push(rgbToHex(hslToRgb(Number(m[1]), Number(m[2]) / 100, Number(m[3]) / 100)));
   }
   return out;
 }
@@ -105,14 +217,16 @@ export function extractCssTokens(css: string): { tokens: Tokens; stats: CssStats
     const sels = r.selector.split(",").map((s) => s.trim());
     const isRoot = sels.some((s) => [":root", "html", "body", "*"].includes(s));
     const isHeading = sels.some((s) => /^h[1-6]$/i.test(s));
+    const dark = (r.context ?? []).some((c) => /prefers-color-scheme\s*:\s*dark/i.test(c));
     for (const [prop, val] of r.decls) {
       const cs = colorsIn(val);
-      if (prop.startsWith("--") && cs.length === 1 && /^(#|rgb|hsl)/i.test(val)) {
-        named[prop.slice(2).toLowerCase().replace(/[^a-z0-9-]+/g, "-")] = cs[0];
+      // Dark-mode overrides still count as used colors, but must not replace the light-mode tokens.
+      if (!dark && prop.startsWith("--") && cs.length === 1 && /^(#|rgb|hsl|hwb|oklch|oklab)/i.test(val)) {
+        named[prop.slice(2).toLowerCase().replace(/[^a-z0-9-]+/g, "-")] ??= cs[0];
       }
       for (const c of cs) bump(colorCount, c);
-      if (isRoot && (prop === "background" || prop === "background-color")) bodyBg ??= cs[0];
-      if (isRoot && prop === "color") bodyText ??= cs[0];
+      if (!dark && isRoot && (prop === "background" || prop === "background-color")) bodyBg ??= cs[0];
+      if (!dark && isRoot && prop === "color") bodyText ??= cs[0];
       if (prop === "font-family") {
         const f = firstFamily(val);
         if (f) {
