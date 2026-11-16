@@ -1,0 +1,108 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.stonefrozen096-collab/red-design-mcp",
+  "title": "Red Design MCP",
+  "description": "Analyze, recreate and audit designs: tokens, palettes, WCAG contrast, CSS lint, design systems.",
+  "repository": {
+    "url": "https://github.com/stonefrozen096-collab/red-design-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/stonefrozen096-collab/red-design-mcp#readme",
+  "version": "0.2.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "red-design-mcp",
+      "version": "0.2.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "description": "Anthropic API key. Optional: any provider key switches vision tools from host mode (your AI tool looks at images) to API mode.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "description": "OpenAI API key. Optional, used for the vision tools in API mode.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "GEMINI_API_KEY",
+          "description": "Google Gemini API key (GOOGLE_API_KEY also works). Optional, used for the vision tools in API mode.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "GROQ_API_KEY",
+          "description": "Groq API key. Optional, used for the vision tools in API mode.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "OPENROUTER_API_KEY",
+          "description": "OpenRouter API key. Optional, used for the vision tools in API mode.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "RED_PROVIDER",
+          "description": "Force one provider when several keys are set. Default: first key found in the order anthropic, openai, google, groq, openrouter.",
+          "isRequired": false,
+          "choices": [
+            "anthropic",
+            "openai",
+            "google",
+            "groq",
+            "openrouter",
+            "custom"
+          ]
+        },
+        {
+          "name": "RED_MODEL",
+          "description": "Override the model name used in API mode, for example claude-opus-5-5.",
+          "isRequired": false
+        },
+        {
+          "name": "RED_BASE_URL",
+          "description": "Base URL of any OpenAI-compatible endpoint, such as Ollama at http://localhost:11434/v1. Also set RED_MODEL.",
+          "isRequired": false
+        },
+        {
+          "name": "RED_API_KEY",
+          "description": "API key for the custom OpenAI-compatible endpoint, if it needs one.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "RED_MAX_TOKENS",
+          "description": "Maximum reply length for vision calls. Default 16000.",
+          "isRequired": false,
+          "format": "number"
+        },
+        {
+          "name": "RED_TOOLS",
+          "description": "Which tools to load: groups core, vision, web, color, system, components, quality, or tool names. Combine with commas, exclude with a dash, add auto to let the AI discover tools on demand. Default: all.",
+          "isRequired": false,
+          "placeholder": "core,web"
+        },
+        {
+          "name": "RED_ALLOW_PRIVATE_URLS",
+          "description": "Set to true to let tools fetch or capture localhost and private-network addresses. Blocked by default for safety.",
+          "isRequired": false,
+          "format": "boolean"
+        },
+        {
+          "name": "RED_ALLOWED_DIRS",
+          "description": "Optional folders images may be read from, separated by the OS path separator (: on Mac and Linux, ; on Windows). Unset allows any folder, but only real image files are ever read.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}
